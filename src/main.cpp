@@ -11,6 +11,10 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/BasicBlock.h>
 
+// IR optimizations
+#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/GVN.h>
 
 // After the creation of any llvm::Function, it is recomended
 // to verify it by calling llvm::verifyFunction.
@@ -33,6 +37,35 @@ inline void assertModuleCorrect(const llvm::Module& m)
         throw std::runtime_error{errs.str()};
     }
 }
+
+class FunctionBasicOptimizer {
+public:
+    FunctionBasicOptimizer(llvm::Module& module)
+        : fpm(&module)
+    {
+        // Do simple "peephole" optimizations and bit-twiddling optzns.
+        fpm.add(llvm::createInstructionCombiningPass());
+
+        // Reassociate expressions.
+        fpm.add(llvm::createReassociatePass());
+
+        // Eliminate Common SubExpressions.
+        fpm.add(llvm::createGVNPass());
+
+        // Simplify the control flow graph (deleting unreachable blocks, etc).
+        fpm.add(llvm::createCFGSimplificationPass());
+
+        fpm.doInitialization();
+    }
+
+    void optimize(llvm::Function& func)
+    {
+        fpm.run(func);
+    }
+
+private:
+    llvm::legacy::FunctionPassManager fpm;
+};
 
 inline std::unique_ptr<llvm::Module> codegen(const std::string& moduleName, llvm::LLVMContext& llvmContext)
 {
@@ -105,6 +138,11 @@ int main(int /*argc*/, char */*argv*/[])
 
         auto module = codegen("my first module", llvmContext);
 
+        // Optimize all functions inside the module.
+        FunctionBasicOptimizer fopt(*module);
+        for (auto& func : *module) {
+            fopt.optimize(func);
+        }
 
         /**** ... and use it for example for JITing ****/
         module->dump();
